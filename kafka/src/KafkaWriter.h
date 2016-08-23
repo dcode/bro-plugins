@@ -47,6 +47,7 @@ protected:
 
 private:
     void InitConfigOptions();
+    threading::Field** DeDotFields(const threading::Field* const* fields, int num_fields );
 
     static const string default_topic_key;
 
@@ -57,6 +58,8 @@ private:
     string json_format;
     string json_timestamps;
     map<string, string> kafka_conf;
+
+    threading::Field** dedot_fields;
 
     threading::formatter::Formatter *formatter;
 

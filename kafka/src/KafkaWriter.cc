@@ -14,7 +14,11 @@
 using namespace logging;
 using namespace writer;
 
-KafkaWriter::KafkaWriter(WriterFrontend* frontend): WriterBackend(frontend), formatter(NULL), rd_producer(NULL)
+KafkaWriter::KafkaWriter(WriterFrontend* frontend):
+    WriterBackend(frontend),
+    dedot_fields(NULL),
+    formatter(NULL),
+    rd_producer(NULL)
 {
     tag_json = false;
     topic_name = "";
@@ -142,7 +146,31 @@ bool KafkaWriter::DoInit(const WriterInfo& info, int num_fields, const threading
         return false;
     }
 
+    // Sanitize fields TODO: Make this an optional flag
+    dedot_fields = DeDotFields(fields, num_fields );
+
     return true;
+}
+
+threading::Field** KafkaWriter::DeDotFields(const threading::Field* const* fields, int num_fields )
+{
+  // Create sanitized array of fields. This is thread-local and should be cleanedup in ~KafkaWriter
+  threading::Field** newFields = (threading::Field**) malloc( sizeof(threading::Field*) * (num_fields));
+
+  // Loop through array and copy over the field name, scrubbing the dot
+  for ( int i = 0; i < num_fields; i++ )
+  {
+      string newName;
+      newName = strreplace(fields[i]->name, ".", "_");
+
+      newFields[i] = new threading::Field(newName.c_str(),
+          fields[i]->secondary_name,
+          fields[i]->type,
+          fields[i]->subtype,
+          true);
+  }
+
+  return newFields;
 }
 
 /**
@@ -187,7 +215,10 @@ bool KafkaWriter::DoWrite(int num_fields, const threading::Field* const* fields,
     buff.Clear();
 
     // format the log entry
-    formatter->Describe(&buff, num_fields, fields, vals);
+    //formatter->Describe(&buff, num_fields, fields, vals);
+
+    // format the log entry w/ dedot fields
+    formatter->Describe(&buff, num_fields, dedot_fields, vals);
 
     // send the formatted log entry to kafka
     const char* raw = (const char*)buff.Bytes();
