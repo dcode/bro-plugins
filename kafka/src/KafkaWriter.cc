@@ -9,11 +9,20 @@
 #include "kafka.bif.h"
 
 #include "TaggedJSON.h"
+#include "FlexiJSON.h"
 
 using namespace logging;
 using namespace writer;
 
 KafkaWriter::KafkaWriter(WriterFrontend* frontend): WriterBackend(frontend), formatter(NULL), rd_producer(NULL)
+{
+    tag_json = false;
+    topic_name = "";
+
+    InitConfigOptions();
+}
+
+void KafkaWriter::InitConfigOptions()
 {
     // need thread-local copy of all user-defined settings coming from
     // bro scripting land.  accessing these is not thread-safe and 'DoInit'
@@ -44,6 +53,20 @@ KafkaWriter::KafkaWriter(WriterFrontend* frontend): WriterBackend(frontend), for
         Unref(index);
         delete k;
     }
+
+    ODesc tsfmt;
+    BifConst::Kafka::json_timestamps->Describe(&tsfmt);
+    json_timestamps.assign(
+        (const char*) tsfmt.Bytes(),
+        tsfmt.Len()
+        );
+
+    ODesc jsonfmt;
+    BifConst::Kafka::json_format->Describe(&jsonfmt);
+    json_format.assign(
+        (const char*) jsonfmt.Bytes(),
+        jsonfmt.Len()
+        );
 }
 
 KafkaWriter::~KafkaWriter()
@@ -51,16 +74,40 @@ KafkaWriter::~KafkaWriter()
 
 bool KafkaWriter::DoInit(const WriterInfo& info, int num_fields, const threading::Field* const* fields)
 {
+    delete formatter;
+    formatter = 0;
+
+    threading::formatter::JSON::TimeFormat tf = threading::formatter::JSON::TS_EPOCH;
+
+    // Format timestamps
+    if ( strcmp(json_timestamps.c_str(), "JSON::TS_EPOCH") == 0 )
+        tf = threading::formatter::JSON::TS_EPOCH;
+    else if ( strcmp(json_timestamps.c_str(), "JSON::TS_MILLIS") == 0 )
+        tf = threading::formatter::JSON::TS_MILLIS;
+    else if ( strcmp(json_timestamps.c_str(), "JSON::TS_ISO8601") == 0 )
+        tf = threading::formatter::JSON::TS_ISO8601;
+    else
+    {
+       Error(Fmt("Invalid JSON timestamp format: %s", json_timestamps.c_str()));
+       return false;
+    }
+
+    // Format JSON
+    if( strcmp(json_format.c_str(), "Kafka::JS_DEFAULT") == 0 )
+        formatter = new threading::formatter::JSON(this, tf);
+    else if( strcmp(json_format.c_str(), "Kafka::JS_TAGGED") == 0 )
+        formatter = new threading::formatter::TaggedJSON(info.path, this, tf);
+    else if( strcmp(json_format.c_str(), "Kafka::JS_FLEXIBLE") == 0 )
+        formatter = new threading::formatter::FlexiJSON(info.path, this, tf);
+    else
+    {
+        Error(Fmt("Invalid JSON format: %s", json_format.c_str()));
+        return false;
+    }
+
     // if no global 'topic_name' is defined, use the log stream's 'path'
     if(topic_name.empty()) {
         topic_name = info.path;
-    }
-
-    // initialize the formatter
-    if(tag_json) {
-        formatter = new threading::formatter::TaggedJSON(info.path, this, threading::formatter::JSON::TS_EPOCH);
-    } else {
-        formatter = new threading::formatter::JSON(this, threading::formatter::JSON::TS_EPOCH);
     }
 
     // kafka global configuration
@@ -70,14 +117,14 @@ bool KafkaWriter::DoInit(const WriterInfo& info, int num_fields, const threading
     // apply the user-defined settings to kafka
     map<string,string>::iterator i;
     for (i = kafka_conf.begin(); i != kafka_conf.end(); ++i) {
-      string key = i->first;
-      string val = i->second;
+        string key = i->first;
+        string val = i->second;
 
       // apply setting to kafka
-      if (RdKafka::Conf::CONF_OK != rd_conf->set(key, val, err)) {
-          reporter->Error("Failed to set '%s'='%s': %s", key.c_str(), val.c_str(), err.c_str());
-          return false;
-      }
+        if (RdKafka::Conf::CONF_OK != rd_conf->set(key, val, err)) {
+            reporter->Error("Failed to set '%s'='%s': %s", key.c_str(), val.c_str(), err.c_str());
+            return false;
+        }
     }
 
     // create kafka producer
