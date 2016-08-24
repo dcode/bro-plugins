@@ -1,4 +1,3 @@
-
 ===============================
 Writing Logging Output to Kafka
 ===============================
@@ -14,10 +13,10 @@ Installation
 
 Install librdkafka (https://github.com/edenhill/librdkafka), a native client
 library for Kafka.  This plugin has been tested against the latest release of
-librdkafka, which at the time of this writing is v0.8.6::
+librdkafka, which at the time of this writing is v0.8.6, v0.9.0, v0.9.1:
 
-    # curl -L https://github.com/edenhill/librdkafka/archive/0.8.6.tar.gz | tar xvz
-    # cd librdkafka-0.8.6/
+    # curl -L https://github.com/edenhill/librdkafka/archive/0.9.1.tar.gz | tar xvz
+    # cd librdkafka-0.9.1/
     # ./configure
     # make
     # sudo make install
@@ -48,19 +47,20 @@ topic name.  The ``Conn::LOG`` will be sent to the topic ``conn`` and the
 .. console::
 
     @load Bro/Kafka/logs-to-kafka.bro
-    redef Kafka::logs_to_send = set(Conn::LOG, HTTP::LOG);
+    redef Kafka::include_logs = set(Conn::LOG, HTTP::LOG);
     redef Kafka::kafka_conf = table(
         ["metadata.broker.list"] = "localhost:9092"
     );
 
 If all log streams need to be sent to the same topic, define the name of
 the topic in a variable called ``topic_name``.  In this example, both
-``Conn::LOG`` and ``HTTP::LOG`` will be sent to the topic named ``bro``.
+``DNS::LOG`` and ``HTTP::LOG`` will be excluded in the topic named ``bro``.
+All other Bro logs will be sent, by default.
 
 .. console::
 
     @load Bro/Kafka/logs-to-kafka.bro
-    redef Kafka::logs_to_send = set(Conn::LOG, HTTP::LOG);
+    redef Kafka::exclude = set(DNS::LOG, HTTP::LOG);
     redef Kafka::kafka_conf = table(
         ["metadata.broker.list"] = "localhost:9092"
     );
@@ -71,6 +71,8 @@ those topic names.   This can be done through the same mechanism in
 which the name of a log file for a stream is customized.  Here is an old
 example (look for the $path_func field)
 http://blog.bro.org/2012/02/filtering-logs-with-bro.html.
+
+
 
 Settings
 --------
@@ -107,11 +109,58 @@ queued messages to be sent to Kafka before forced shutdown.
 
     redef Kafka::max_wait_on_shutdown = 3000;
 
-``tag_json``
+``json_format``
 
-If true, a log stream identifier is appended to each JSON-formatted message. For
+If set to ``Kafka::JS_DEFAULT``, log events will use the default Bro JSON format.
+
+If set to ``Kafka::JS_TAGGED``,  a log stream identifier is appended to each JSON-formatted message. For
 example, a Conn::LOG message will look like ``{ 'conn' : { ... }}``.
+
+If set to ``Kafka::JS_FLEXIBLE``, a log stream identifier is added inside a "@meta" sub-object. This also
+enables use of the ``meta_json`` parameter.
 
 .. console::
 
-    redef Kafka::tag_json = T;
+    redef Kafka::json_format = JSON::TS_FLEXIBLE;
+
+``json_timestamps``
+
+Uses the same enum as the Ascii log writer on timestamp format. Default is ``JSON::TS_EPOCH``. Other options
+are ``JSON::TS_MILLIS`` and ``JSON::TS_ISO8601``.
+
+.. console::
+
+    redef Kafka::json_timestamps = JSON::TS_ISO8601;
+
+``meta_json``
+
+Allows user to set arbitrary string to be added to the ``@meta`` sub-object of the log event. This can be
+handy for setting a sensor id, for example. JSON-complaince is up to the user. If Elasticsearch or JQ is
+denying your data, check this for proper formatting.
+
+.. console::
+
+    redef Kafka::meta_json = "\"sensor\":\"bro001\"";
+
+Example output:
+``{"ts": ..., "@meta": { "path": "conn", "sensor": "bro001" }}``
+
+
+Operationally Useful Example
+------------------------------
+
+.. console::
+
+  @load Bro/Kafka/logs-to-kafka
+
+  # Include all logs by default
+  redef Kafka::kafka_conf = table (
+    ["metadata.broker.list"] = "localhost:9092",
+    ["client.id"] = "bro"
+
+  );
+  redef Kafka::topic_name = "bro";
+  redef Kafka::json_format = Kafka::JS_FLEXIBLE;
+  redef Kafka::json_timestamps = JSON::TS_ISO8601;
+
+  redef Kafka::meta_json = "\"sensor\":\"bro001\"";

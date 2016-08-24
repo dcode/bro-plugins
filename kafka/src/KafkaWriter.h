@@ -6,6 +6,8 @@
 
 #include <logging/WriterBackend.h>
 
+#include "kafka.bif.h"
+
 namespace RdKafka {
     class Conf;
     class Producer;
@@ -34,6 +36,7 @@ public:
     }
 
 protected:
+
     virtual bool DoInit(const WriterBackend::WriterInfo& info, int num_fields, const threading::Field* const* fields);
     virtual bool DoWrite(int num_fields, const threading::Field* const* fields, threading::Value** vals);
     virtual bool DoSetBuf(bool enabled);
@@ -43,12 +46,21 @@ protected:
     virtual bool DoHeartbeat(double network_time, double current_time);
 
 private:
+    void InitConfigOptions();
+    threading::Field** DeDotFields(const threading::Field* const* fields, int num_fields );
+
     static const string default_topic_key;
 
     string stream_id;
     string topic_name;
-    bool tag_json;
+    string meta_json;
+    bool init_options;
+    string json_format;
+    string json_timestamps;
     map<string, string> kafka_conf;
+
+    threading::Field** dedot_fields;
+    int dedot_numfields;
 
     threading::formatter::Formatter *formatter;
 
